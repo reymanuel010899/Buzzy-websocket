@@ -18,11 +18,11 @@ manager = WebSocketManager()
 # Registro de rutas
 app.include_router(videos.router, prefix="/videos")
 app.include_router(likes.router, prefix="/likes")
-DJANGO_API_URL = "http://127.0.0.1:8000"  # Cambia esto en producción (usa .env)
+DJANGO_API_URL = os.getenv("DJANGO_API_URL")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Cambia esto en producción
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -80,7 +80,6 @@ async def websocket_endpoint(
     token: str = None
 ):
     await ws.accept()
-
     if not user_id:
         await ws.close(code=1008, reason="user_id requerido")
         return
@@ -95,7 +94,7 @@ async def websocket_endpoint(
             if message_type == "REGISTER":
                 await update_user_online_status(user_id, is_online=True, token=token)
                 manager.add_user_socket(user_id, ws)
-
+                await manager.connect_global(ws)
                 await ws.send_json({
                     "type": "registered",
                     "user_id": user_id
@@ -153,7 +152,7 @@ async def ws_chat(websocket: WebSocket, chat_uuid: str):
                     "sender_id": user_id,
                     "chat_uuid": chat_uuid
                 }
-                # await manager.broadcast_to_chat(chat_uuid, enriched_data)
+          
                 await manager.send_to_user(receiver_id, enriched_data)
 
             elif message_type == "typing" and chat_uuid:
@@ -163,13 +162,6 @@ async def ws_chat(websocket: WebSocket, chat_uuid: str):
                     "chat_uuid": chat_uuid
                 }
             
-                print(f"Usuario {user_id} está {receiver_id} escribiendo en chat {chat_uuid}: {data.get('is_typing')}")
-                # await manager.broadcast_to_chat(chat_uuid, {
-                #     "type": "typing",
-                #     "user_id": user_id,
-                #     "is_typing": data.get("is_typing", False),
-                #     "event": "typing"
-                # })
                 await manager.send_to_user(receiver_id, enriched_data, is_global=True)
             elif  message_type == "REGISTER":
                 await update_user_online_status(user_id, is_online=True, token=token)
@@ -212,36 +204,38 @@ async def broadcast_chat(request: Request):
             }
     print("Broadcast chat:", enriched_data)
     await manager.send_to_user(receiver_id, enriched_data, is_global=False)
-    # await manager.broadcast_global({"event": "send_message", "global": True, **data})
-    # await manager.broadcast_to_chat(chat_uuid, {
-    #     "type": data.get("type"),
-    #     "global": False,
-    #     **data
-    # })
-
     return {"status": "broadcasted"}
 
 
 
-# Este endpoint recibe los eventos desde Django
 @app.post("/broadcast-like/")
 async def broadcast_like(request: Request):
     data = await request.json()
     print("Broadcast like:", data)
-    await manager.broadcast_global({"event": "like_updated", **data})
+    await manager.send_event_to_users(
+    user_ids={data.get("user_id"), data.get("video_user_id")},
+    data=data
+)
     return {"status": "broadcasted"}
 
 @app.post("/create-comment/")
 async def create_comment(request: Request):
     data = await request.json()
-    await manager.broadcast_global({"event": "new_comment", **data})
+    await manager.send_event_to_users(
+    user_ids={data.get("user_id").get("id"), data.get("video_user_id")},
+    data=data
+)
+
     return {"status": "broadcasted"}
 
 
 @app.post("/create-view/")
 async def create_view(request: Request):
     data = await request.json()
-    await manager.broadcast_global({"event": "new_view", **data})
+    await manager.send_event_to_users(
+        user_ids={data.get("user_id"), data.get("video_user_id")},
+        data=data
+    )
     return {"status": "broadcasted"}
 
 

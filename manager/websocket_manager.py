@@ -22,6 +22,15 @@ class WebSocketManager:
             f"User {user_id} sockets:",
             len(self.user_connections[user_id])
         )
+        
+    async def send_event_to_users(self, user_ids: set[str], data: dict):
+        connections: Set[WebSocket] = set()
+
+        for user_id in user_ids:
+            connections |= self.user_connections.get(user_id, set())
+
+        await self._safe_broadcast(connections, data)
+
 
     def is_user_online(self, user_id: int) -> bool:
         return user_id in self.user_connections
@@ -49,8 +58,10 @@ class WebSocketManager:
                 print(f"Failed to send to user {user_id} socket, removing it.")
                 self.remove_user_socket(user_id, ws)
 
+    # async def send_to_group
     # ---------- GLOBAL ----------
     async def connect_global(self, ws: WebSocket):
+        print("New global connection")
         self.global_connections.add(ws)
 
     def disconnect_global(self, ws: WebSocket):
@@ -68,7 +79,8 @@ class WebSocketManager:
                 del self.chat_rooms[chat_uuid]
 
     async def broadcast_global(self, data: dict):
-        await self._safe_broadcast(self.global_connections, data)
+        res = await self._safe_broadcast(self.global_connections, data)
+        print(f"Broadcasted globally to {len(self.global_connections)} connections: {data}")
 
     async def broadcast_to_chat(self, chat_uuid: str, data: dict):
         connections = self.chat_rooms.get(chat_uuid, set())
