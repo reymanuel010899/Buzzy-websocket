@@ -64,7 +64,7 @@ async def update_user_online_status(user_id: int, is_online: bool, token: str=No
         import httpx  # Mejor que requests en async
         async with httpx.AsyncClient() as client:
             await client.post(
-                f"{DJANGO_API_URL}/media/api/update-online-status/",
+                f"{DJANGO_API_URL}/api/update-online-status/",
                 json=payload,
                 headers=headers,
                 timeout=5.0
@@ -83,14 +83,12 @@ async def websocket_endpoint(
     if not user_id:
         await ws.close(code=1008, reason="user_id requerido")
         return
-
+    print("🔥 WS GLOBAL:", token)
     try:
         while True:
             data = await ws.receive_json()
-            print("🔥 WS GLOBAL:", data)
-
             message_type = data.get("type")
-
+            print("🔥 WS GLOBAL:", message_type)
             if message_type == "REGISTER":
                 await update_user_online_status(user_id, is_online=True, token=token)
                 manager.add_user_socket(user_id, ws)
@@ -166,6 +164,32 @@ async def ws_chat(websocket: WebSocket, chat_uuid: str):
             elif  message_type == "REGISTER":
                 await update_user_online_status(user_id, is_online=True, token=token)
                 manager.add_user_socket(user_id, websocket)
+
+            elif message_type == "reaction":
+                message_uuid = data.get("message_uuid")
+                emoji = data.get("emoji")
+                if message_uuid and emoji:
+                    try:
+                        import httpx
+                        async with httpx.AsyncClient() as client:
+                            resp = await client.post(
+                                f"{DJANGO_API_URL}/api/messages/reaction/",
+                                json={"message_uuid": message_uuid, "user_id": user_id, "emoji": emoji},
+                                timeout=5.0
+                            )
+                            result = resp.json()  # {"action": "added" | "removed"}
+
+                        # Broadcast to chat so both participants update in real time
+                        await manager.broadcast_to_chat(chat_uuid, {
+                            "event": "reaction",
+                            "message_uuid": message_uuid,
+                            "emoji": emoji,
+                            "user_id": user_id,
+                            "username": result.get("username", "Anónimo"),
+                            "action": result.get("action", "added")
+                        })
+                    except Exception as e:
+                        print(f"Error saving reaction: {e}")
 
 
     except WebSocketDisconnect:
