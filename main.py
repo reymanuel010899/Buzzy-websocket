@@ -47,14 +47,15 @@ async def root():
     }
 
 
-async def update_user_online_status(user_id: int, is_online: bool, token: str=None):
+async def update_user_online_status(user_id: int, is_online: bool, token: str=None, device_token: str=None):
     """
     Actualiza el estado online/offline del usuario en Django
     Se llama desde el WebSocket cuando conecta/desconecta
     """
     payload = {
         "user_id": user_id,
-        "is_online": is_online
+        "is_online": is_online,
+        "device_token": device_token
     }
     headers = {}
     if token:
@@ -90,7 +91,7 @@ async def websocket_endpoint(
             message_type = data.get("type")
             print("🔥 WS GLOBAL:", message_type)
             if message_type == "REGISTER":
-                await update_user_online_status(user_id, is_online=True, token=token)
+                await update_user_online_status(user_id, is_online=True, token=token, device_token=data.get("device_token"))
                 manager.add_user_socket(user_id, ws)
                 await manager.connect_global(ws)
                 await ws.send_json({
@@ -133,10 +134,9 @@ async def ws_chat(websocket: WebSocket, chat_uuid: str):
         await websocket.close(code=1008, reason="Token JWT inválido")
         return
 
-    # manager.add_user_socket(user_id, websocket)
+    manager.add_user_socket(user_id, websocket)
     await manager.connect_to_chat(websocket, chat_uuid)
-    manager.user_connections[user_id] = websocket
-    update_user_online_status(user_id, is_online=True)
+    await update_user_online_status(user_id, is_online=True, token=token)
     try:
         while True:
             data = await websocket.receive_json()
@@ -211,13 +211,26 @@ async def ws_chat(websocket: WebSocket, chat_uuid: str):
             "user_id": user_id
         })
 
+@app.post("/broadcast-call/")
+async def broadcast_call(request: Request):
+    data = await request.json()
+    receiver_id = int(data.get('recipient_id'))
+    if not receiver_id:
+        return {"error": "recipient_id is requerido"}
+
+    # Forward the call event to the specific user
+    # type can be: incoming_call, call_accepted, call_rejected, etc.
+    print(f"Broadcast call to {receiver_id}: {data}")
+    await manager.send_to_user(receiver_id, data, is_global=False)
+    return {"status": "broadcasted"}
+
 @app.post("/broadcast-chat/")
 async def broadcast_chat(request: Request):
     data = await request.json()
     data['event'] = 'send_message'
 
     chat_uuid = data.get("chat_uuid")
-    receiver_id = data['recipient_id']
+    receiver_id = int(data['recipient_id'])
     if not chat_uuid:
         return {
             "error": "chat_uuid es requerido"

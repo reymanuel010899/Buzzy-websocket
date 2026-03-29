@@ -48,7 +48,9 @@ class WebSocketManager:
         if is_global:
             message['event'] = 'typing'
         else:
-            message['event'] = 'send_message'
+            # Use the 'type' field from the message as the 'event' if provided,
+            # otherwise default to 'send_message'
+            message['event'] = message.get('type', 'send_message')
             
         for ws in list(sockets):
             try:
