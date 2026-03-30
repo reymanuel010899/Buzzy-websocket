@@ -295,3 +295,28 @@ async def broadcast_gift(request: Request):
     await manager.broadcast_global({"event": "gift_received", **data})
     return {"status": "broadcasted"}
 
+
+@app.post("/broadcast-video-ready/")
+async def broadcast_video_ready(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id")
+    if not user_id:
+        return {"error": "user_id requerido"}
+
+    event_name = "video_ready" if data.get("status") == "ready" else "video_blocked"
+    sockets = manager.user_connections.get(int(user_id), set())
+    payload = {
+        "event": event_name,
+        "video_id": data.get("video_id"),
+        "status": data.get("status"),
+        "category": data.get("category"),
+        "safety_label": data.get("safety_label"),
+    }
+    for ws in list(sockets):
+        try:
+            await ws.send_json(payload)
+        except Exception:
+            manager.remove_user_socket(int(user_id), ws)
+
+    return {"status": "broadcasted", "event": event_name, "sockets": len(sockets)}
+
